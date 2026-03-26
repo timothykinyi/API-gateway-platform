@@ -6,7 +6,7 @@ const RequestQueue = require("../models/requestQueue.model");
 const router = express.Router();
 
 // ----------------- Config -----------------
-const HEALTH_INTERVAL = 1 * 60 * 100;
+const HEALTH_INTERVAL = 1 * 60 * 1000;
 const SPIKE_WINDOW = 10 * 1000;
 const SPIKE_THRESHOLD = 10;
 const MAX_RETRIES = 2;
