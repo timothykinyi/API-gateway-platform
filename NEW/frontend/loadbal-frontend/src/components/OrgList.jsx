@@ -29,7 +29,7 @@ export default function OrgList() {
         <div key={org._id} style={{ border: "1px solid #ccc", padding: 10, margin: 10 }}>
           <h3>{org.name}</h3>
           <p>API Key: {org.apiKey}</p>
-
+          <p>Org ID: {org._id}</p>
           <ServerForm orgId={org._id} onAdded={handleServerAdded} />
           <ServerList org={org} />
         </div>

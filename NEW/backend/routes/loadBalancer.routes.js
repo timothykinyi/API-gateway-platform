@@ -178,19 +178,28 @@ const getNextServer = (org, activeServers) => {
 // ----------------- FORWARD -----------------
 
 const forwardRequest = async (server, req) => {
-  const url = `${server.url}/${req.params.path || ""}`;
-
+  //const url = `${server.url}/${req.params.path || ""}`;
+  const base = server.url.replace(/\/$/, "");
+  const path = req.params.path ? `/${req.params.path}` : "";
+  const url = base + path;
   try {
     const response = await axios({
       method: req.method.toLowerCase(),
       url,
-      headers: { ...req.headers, host: undefined },
+
+      // 🔥 CLEAN HEADERS
+      headers: {
+        Authorization: req.headers.authorization || "",
+        "Content-Type": req.headers["content-type"] || "application/json",
+      },
+
       data: req.body,
       params: req.query,
       timeout: 10000,
     });
 
     return { success: true, data: response };
+
   } catch (err) {
     const status = err.response?.status;
 
@@ -240,6 +249,9 @@ const routeRequest = async (req, res, retries = 0) => {
 
     const activeServers = org.servers.filter(s => s.status === "active");
 
+    if (!activeServers.length) {
+      return res.status(503).json({ error: "No active servers" });
+    }
     const server = getNextServer(org, activeServers);
 
     const result = await forwardRequest(server, req);
