@@ -36,7 +36,6 @@ app.use(
 );
 
 // ✅ Handle preflight
-app.options("*", cors());
 
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*"); // or specific domain
