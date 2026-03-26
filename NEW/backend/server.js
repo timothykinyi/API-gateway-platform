@@ -15,6 +15,7 @@ const app = express();
 // ✅ CORS FIX
 const allowedOrigins = [
   "http://localhost:3000",
+  
   "https://kai-whatsapp-bot.web.app",
 ];
 
