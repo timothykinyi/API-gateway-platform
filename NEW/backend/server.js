@@ -3,7 +3,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
-
+const https = require('https');
 const connectDB = require("./config/db");
 const orgRoutes = require("./routes/org.routes");
 //const { startHealthChecks } = require("./services/health.service");
@@ -35,6 +35,19 @@ app.get("/", (req, res) => {
 // Start periodic health checks
 startHealthChecks();
 
+const keepServerActive = (url) => {
+  const req = https.get(url, (res) => {
+    console.log(`Pinged ${url} - Status: ${res.statusCode}`);
+  });
+
+  req.on('error', (err) => {
+    console.error(`Error pinging ${url}:`, err.message);
+  });
+  req.end();
+};
+
+setInterval(() => keepServerActive(process.env.PING_URLn), 720000);
+//720000
 // Start
 const PORT = process.env.PORT || 5000;
 
