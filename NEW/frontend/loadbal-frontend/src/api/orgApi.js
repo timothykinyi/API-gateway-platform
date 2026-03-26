@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const API_BASE = "https://api-gateway-platform.onrender.com/api/orgs";
+const API_BASE = "http://localhost:5000/api/orgs";
 
 //https://api-gateway-platform.onrender.com
 //http://localhost:5000

@@ -23,9 +23,17 @@ setInterval(() => {
 }, IP_WINDOW);
 // Round robin per org
 
-const checkIPRateLimit = (req, res) => {
+/* const checkIPRateLimit = (req, res) => {
   const ip = req.ip || req.connection.remoteAddress;
+ */
 
+  const checkIPRateLimit = (req, res) => {
+  const ip =
+    req.ip ||
+    req.headers["x-forwarded-for"] ||
+    req.connection?.remoteAddress ||
+    "unknown"; // fallback for queued requests
+    
   // 🔒 Check if blocked
   const blockedUntil = blockedIPs.get(ip);
   if (blockedUntil && Date.now() < blockedUntil) {
@@ -313,8 +321,12 @@ const processQueue = async () => {
       query: item.query
     };
 
-    const fakeRes = { status: () => ({ send: () => {} }) };
-
+    const fakeRes = {
+      status: () => ({
+        send: () => {},
+        json: () => {}
+      })
+    };
     await routeRequest(fakeReq, fakeRes, item.retries);
 
     await RequestQueue.findByIdAndDelete(item._id);
