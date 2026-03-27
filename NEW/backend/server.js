@@ -14,8 +14,8 @@ const app = express();
 
 // ✅ CORS FIX
 const allowedOrigins = [
-  "http://localhost:3000",
-  
+  //"http://localhost:3000",
+  //"http://localhost:8080",
   "https://kai-whatsapp-bot.web.app",
 ];
 
@@ -79,6 +79,22 @@ app.use("/route", loadBalancerRoutes);
 // Health check
 app.get("/", (req, res) => {
   res.send({ status: "Load Balancer API Running" });
+});
+
+app.get("/health", async (req, res) => {
+  try {
+
+    res.status(200).json({
+      status: "ok",
+      timestamp: Date.now(),
+      server: 5000,
+    });
+  } catch (err) {
+    res.status(500).json({
+      status: "error",
+      message: err.message,
+    });
+  }
 });
 
 // Start health checks
