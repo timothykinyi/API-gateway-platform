@@ -1,40 +1,35 @@
 const express = require("express");
 const axios = require("axios");
 const Org = require("../models/org.model");
-const RequestQueue = require("../models/requestQueue.model");
 
 const router = express.Router();
 
 // ----------------- Config -----------------
-const HEALTH_INTERVAL = 1 * 60 * 1000;
+const HEALTH_INTERVAL = 5 * 60 * 1000;
 const SPIKE_WINDOW = 10 * 1000;
 const SPIKE_THRESHOLD = 10;
-const MAX_RETRIES = 2;
 const SCALE_DOWN_COOLDOWN = 30 * 1000;
 
-const IP_WINDOW = 10 * 1000; // 10 sec
-const IP_THRESHOLD = 20; // max requests per window
-const IP_BLOCK_TIME = 60 * 1000; // 1 min
-const ipTrafficMap = new Map(); // ip → count
-const blockedIPs = new Map(); // ip → unblockTime
+const IP_WINDOW = 10 * 1000;
+const IP_THRESHOLD = 20;
+const IP_BLOCK_TIME = 60 * 1000;
+
+const ipTrafficMap = new Map();
+const blockedIPs = new Map();
 
 setInterval(() => {
   ipTrafficMap.clear();
 }, IP_WINDOW);
-// Round robin per org
 
-/* const checkIPRateLimit = (req, res) => {
-  const ip = req.ip || req.connection.remoteAddress;
- */
+// ----------------- RATE LIMIT -----------------
 
-  const checkIPRateLimit = (req, res) => {
+const checkIPRateLimit = (req, res) => {
   const ip =
     req.ip ||
     req.headers["x-forwarded-for"] ||
     req.connection?.remoteAddress ||
-    "unknown"; // fallback for queued requests
-    
-  // 🔒 Check if blocked
+    "unknown";
+
   const blockedUntil = blockedIPs.get(ip);
   if (blockedUntil && Date.now() < blockedUntil) {
     console.log(`🚫 Blocked IP: ${ip}`);
@@ -42,16 +37,12 @@ setInterval(() => {
     return false;
   }
 
-  // ⏳ Count requests
-  //const count = ipTrafficMap.get(ip) || 0;
   const key = `${ip}_${req.params.orgId}`;
-  const count = ipTrafficMap.get(key) || 0
+  const count = ipTrafficMap.get(key) || 0;
   ipTrafficMap.set(key, count + 1);
 
-  // 🚨 Detect spike
   if (count + 1 > IP_THRESHOLD) {
     console.log(`🚨 DDoS detected from IP: ${ip}`);
-
     blockedIPs.set(ip, Date.now() + IP_BLOCK_TIME);
 
     res.status(429).json({ error: "You are temporarily blocked." });
@@ -61,9 +52,22 @@ setInterval(() => {
   return true;
 };
 
+// ----------------- ROUND ROBIN -----------------
+
 const roundRobinIndex = new Map();
 
-// ----------------- Helpers -----------------
+const getNextServer = (org, activeServers) => {
+  const orgId = org._id.toString();
+  let index = roundRobinIndex.get(orgId) || 0;
+
+  const server = activeServers[index % activeServers.length];
+
+  roundRobinIndex.set(orgId, (index + 1) % activeServers.length);
+
+  return server;
+};
+
+// ----------------- HELPERS -----------------
 
 const checkServer = async (server) => {
   const start = Date.now();
@@ -75,7 +79,7 @@ const checkServer = async (server) => {
   }
 };
 
-// ----------------- SCALING -----------------
+// ----------------- TRAFFIC -----------------
 
 const updateTraffic = async (org) => {
   org.runtime.requestCount += 1;
@@ -84,7 +88,10 @@ const updateTraffic = async (org) => {
 const resetTraffic = async () => {
   await Org.updateMany({}, { $set: { "runtime.requestCount": 0 } });
 };
+
 setInterval(resetTraffic, SPIKE_WINDOW);
+
+// ----------------- SCALING -----------------
 
 const wakeSleepingServers = async (org) => {
   const sleeping = org.servers.filter(s => s.status === "sleeping");
@@ -141,6 +148,7 @@ const ensurePrimary = async (org) => {
     candidate.status = result.status === "active" ? "active" : "down";
     candidate.responseTime = result.responseTime;
     candidate.lastChecked = new Date();
+
     if (candidate.status !== "active") return null;
   }
 
@@ -152,10 +160,7 @@ const ensurePrimary = async (org) => {
 };
 
 const ensureactive = async (org) => {
-
-  const candidate = org.servers.find(s =>
-    ["newactive"].includes(s.status)
-  );
+  const candidate = org.servers.find(s => s.status === "newactive");
 
   if (!candidate) return null;
 
@@ -164,77 +169,21 @@ const ensureactive = async (org) => {
   candidate.responseTime = result.responseTime;
   candidate.lastChecked = new Date();
 
-
-
   await org.save();
   return candidate;
 };
 
-// ----------------- ROUND ROBIN -----------------
+// ----------------- CORE ROUTE -----------------
 
-const getNextServer = (org, activeServers) => {
-  const orgId = org._id.toString();
-  let index = roundRobinIndex.get(orgId) || 0;
-
-  const server = activeServers[index % activeServers.length];
-
-  roundRobinIndex.set(orgId, (index + 1) % activeServers.length);
-
-  return server;
-};
-
-// ----------------- FORWARD -----------------
-
-const forwardRequest = async (server, req) => {
-  //const url = `${server.url}/${req.params.path || ""}`;
-  const base = server.url.replace(/\/$/, "");
-  const path = req.params.path ? `/${req.params.path}` : "";
-  const url = base + path;
+router.get("/:orgId", async (req, res) => {
   try {
-    const response = await axios({
-      method: req.method.toLowerCase(),
-      url,
-
-      // 🔥 CLEAN HEADERS
-      headers: {
-        Authorization: req.headers.authorization || "",
-        "Content-Type": req.headers["content-type"] || "application/json",
-      },
-
-      data: req.body,
-      params: req.query,
-      timeout: 10000,
-    });
-
-    return { success: true, data: response };
-
-  } catch (err) {
-    const status = err.response?.status;
-
-    if (!status || (status >= 500 && status < 600)) {
-      return { success: false };
-    }
-
-    return {
-      success: false,
-      drop: true,
-      clientError: err.response?.data || err.message
-    };
-  }
-};
-
-// ----------------- CORE -----------------
-
-const routeRequest = async (req, res, retries = 0) => {
-  try {
-
     if (!checkIPRateLimit(req, res)) return;
 
+    const org = await Org.findById(req.params.orgId);
 
-    const orgId = req.params.orgId;
-    const org = await Org.findById(orgId);
-
-    if (!org) return res.status(404).json({ error: "Org not found" });
+    if (!org) {
+      return res.status(404).json({ error: "Org not found" });
+    }
 
     await updateTraffic(org);
     await handleScaling(org);
@@ -242,17 +191,7 @@ const routeRequest = async (req, res, retries = 0) => {
     const primary = await ensurePrimary(org);
 
     if (!primary) {
-      await RequestQueue.create({
-        org: org._id,
-        method: req.method,
-        url: req.params.path,
-        headers: req.headers,
-        body: req.body,
-        query: req.query,
-        retries
-      });
-
-      return res.status(503).json({ message: "Queued" });
+      return res.status(503).json({ error: "No available servers" });
     }
 
     const activeServers = org.servers.filter(s => s.status === "active");
@@ -260,86 +199,25 @@ const routeRequest = async (req, res, retries = 0) => {
     if (!activeServers.length) {
       return res.status(503).json({ error: "No active servers" });
     }
-    const server = getNextServer(org, activeServers);
 
-    const result = await forwardRequest(server, req);
+    const selectedServer = getNextServer(org, activeServers);
 
-    if (result.success) {
-      await org.save();
-      return res.status(result.data.status).send(result.data.data);
-    }
+    await org.save();
 
-    if (result.drop) {
-      return res.status(400).send(result.clientError);
-    }
+    // 🔥 THIS IS THE NEW BEHAVIOR
+    console.log(`🎯 Selected Server: ${selectedServer.url}`);
 
-    // fallback
-    for (const fallback of activeServers) {
-      if (fallback.url === server.url) continue;
-
-      const retry = await forwardRequest(fallback, req);
-
-      if (retry.success) {
-        await org.save();
-        return res.status(retry.data.status).send(retry.data.data);
-      }
-    }
-
-    if (retries < MAX_RETRIES) {
-      return routeRequest(req, res, retries + 1);
-    }
-
-    await RequestQueue.create({
-      org: org._id,
-      method: req.method,
-      url: req.params.path,
-      headers: req.headers,
-      body: req.body,
-      query: req.query,
-      retries
+    return res.json({
+      serverUrl: selectedServer.url,
+      status: selectedServer.status,
+      responseTime: selectedServer.responseTime,
+      isPrimary: selectedServer.isPrimary
     });
-
-    return res.status(503).json({ message: "Queued after retries" });
 
   } catch (err) {
     console.error(err.message);
-    res.status(500).json({ error: "Routing failed" });
+    res.status(500).json({ error: "Failed to get server" });
   }
-};
-
-// ----------------- QUEUE -----------------
-
-const processQueue = async () => {
-  const items = await RequestQueue.find().limit(50);
-
-  for (const item of items) {
-    const fakeReq = {
-      method: item.method,
-      params: { orgId: item.org.toString(), path: item.url },
-      headers: item.headers,
-      body: item.body,
-      query: item.query
-    };
-
-    const fakeRes = {
-      status: () => ({
-        send: () => {},
-        json: () => {}
-      })
-    };
-    await routeRequest(fakeReq, fakeRes, item.retries);
-
-    await RequestQueue.findByIdAndDelete(item._id);
-  }
-};
-setInterval(processQueue, 5000);
-
-// ----------------- ROUTE -----------------
-
-router.all(/^\/([^/]+)\/?(.*)/, async (req, res) => {
-  req.params.orgId = req.params[0];
-  req.params.path = req.params[1] || "";
-  await routeRequest(req, res);
 });
 
 module.exports = router;
