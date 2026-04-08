@@ -12,10 +12,10 @@ const { startHealthChecks } = require("./routes/loadBalancer.routes");
 
 const app = express();
 
-// ✅ CORS FIX
+/* -----------------------------------------------
+   🔒 STRICT CORS (DEFAULT)
+------------------------------------------------- */
 const allowedOrigins = [
-  //"http://localhost:3000",
-  //"http://localhost:8080",
   "https://kai-whatsapp-bot.web.app",
 ];
 
@@ -26,9 +26,10 @@ app.use(
 
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
-      } else {
-        return callback(new Error("Not allowed by CORS"));
       }
+
+      console.warn("❌ Blocked by CORS:", origin);
+      return callback(new Error("Not allowed by CORS"));
     },
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
@@ -36,54 +37,58 @@ app.use(
   })
 );
 
-// ✅ Handle preflight
-
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-
-  if (origin) {
-    res.header("Access-Control-Allow-Origin", origin);
-  }
-
-  res.header(
-    "Access-Control-Allow-Headers",
-    "Origin, X-Requested-With, Content-Type, Accept, Authorization"
-  );
-
-  res.header(
-    "Access-Control-Allow-Methods",
-    "GET, POST, PUT, DELETE, OPTIONS"
-  );
-
-  res.header("Access-Control-Allow-Credentials", "true");
+/* -----------------------------------------------
+   🔓 OPEN CORS FOR /route ONLY
+------------------------------------------------- */
+const allowAllCors = (req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
   if (req.method === "OPTIONS") {
     return res.sendStatus(200);
   }
 
   next();
-});
+};
 
-// Other middleware
+/* -----------------------------------------------
+   🧠 IMPORTANT: REMOVE GLOBAL PRE-FLIGHT OVERRIDE
+   (this was breaking your logic before)
+------------------------------------------------- */
+// ❌ removed your previous global app.use CORS override
+
+/* -----------------------------------------------
+   ✅ MIDDLEWARE
+------------------------------------------------- */
 app.use(express.json());
 app.use(morgan("dev"));
 app.set("trust proxy", true);
 
-// DB
+/* -----------------------------------------------
+   ✅ DB
+------------------------------------------------- */
 connectDB();
 
-// Routes
-app.use("/api/orgs", orgRoutes);
-app.use("/route", loadBalancerRoutes);
+/* -----------------------------------------------
+   🔓 OPEN ROUTE (LOAD BALANCER)
+------------------------------------------------- */
+app.use("/route", allowAllCors, loadBalancerRoutes);
 
-// Health check
+/* -----------------------------------------------
+   🔒 PROTECTED ROUTES
+------------------------------------------------- */
+app.use("/api/orgs", orgRoutes);
+
+/* -----------------------------------------------
+   ✅ HEALTH + ROOT
+------------------------------------------------- */
 app.get("/", (req, res) => {
   res.send({ status: "Load Balancer API Running" });
 });
 
 app.get("/health", async (req, res) => {
   try {
-
     res.status(200).json({
       status: "ok",
       timestamp: Date.now(),
@@ -97,10 +102,14 @@ app.get("/health", async (req, res) => {
   }
 });
 
-// Start health checks
+/* -----------------------------------------------
+   ✅ START HEALTH CHECKS
+------------------------------------------------- */
 startHealthChecks();
 
-// Keep server alive
+/* -----------------------------------------------
+   ✅ KEEP SERVER ALIVE
+------------------------------------------------- */
 const keepServerActive = (url) => {
   const req = https.get(url, (res) => {
     console.log(`Pinged ${url} - Status: ${res.statusCode}`);
@@ -113,9 +122,16 @@ const keepServerActive = (url) => {
   req.end();
 };
 
-setInterval(() => keepServerActive(process.env.PING_URLn), 720000);
+// ⚠️ FIXED typo (PING_URLn → PING_URL)
+setInterval(() => {
+  if (process.env.PING_URL) {
+    keepServerActive(process.env.PING_URL);
+  }
+}, 720000);
 
-// Start
+/* -----------------------------------------------
+   ✅ START SERVER
+------------------------------------------------- */
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
