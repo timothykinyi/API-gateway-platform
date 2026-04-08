@@ -13,7 +13,27 @@ const { startHealthChecks } = require("./routes/loadBalancer.routes");
 const app = express();
 
 /* -----------------------------------------------
-   🔒 STRICT CORS (DEFAULT)
+   🔓 OPEN CORS MIDDLEWARE FOR /route
+------------------------------------------------- */
+const allowAllCors = (req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+
+  next();
+};
+
+/* -----------------------------------------------
+   🔓 OPEN ROUTE (LOAD BALANCER) - DEFINED FIRST
+------------------------------------------------- */
+app.use("/route", allowAllCors, loadBalancerRoutes);
+
+/* -----------------------------------------------
+   🔒 STRICT CORS (DEFAULT FOR EVERYTHING ELSE)
 ------------------------------------------------- */
 const allowedOrigins = [
   "https://kai-whatsapp-bot.web.app",
@@ -38,28 +58,7 @@ app.use(
 );
 
 /* -----------------------------------------------
-   🔓 OPEN CORS FOR /route ONLY
-------------------------------------------------- */
-const allowAllCors = (req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(200);
-  }
-
-  next();
-};
-
-/* -----------------------------------------------
-   🧠 IMPORTANT: REMOVE GLOBAL PRE-FLIGHT OVERRIDE
-   (this was breaking your logic before)
-------------------------------------------------- */
-// ❌ removed your previous global app.use CORS override
-
-/* -----------------------------------------------
-   ✅ MIDDLEWARE
+   ✅ STANDARD MIDDLEWARE
 ------------------------------------------------- */
 app.use(express.json());
 app.use(morgan("dev"));
@@ -69,11 +68,6 @@ app.set("trust proxy", true);
    ✅ DB
 ------------------------------------------------- */
 connectDB();
-
-/* -----------------------------------------------
-   🔓 OPEN ROUTE (LOAD BALANCER)
-------------------------------------------------- */
-app.use("/route", allowAllCors, loadBalancerRoutes);
 
 /* -----------------------------------------------
    🔒 PROTECTED ROUTES
@@ -122,7 +116,6 @@ const keepServerActive = (url) => {
   req.end();
 };
 
-// ⚠️ FIXED typo (PING_URLn → PING_URL)
 setInterval(() => {
   if (process.env.PING_URL) {
     keepServerActive(process.env.PING_URL);
@@ -135,5 +128,5 @@ setInterval(() => {
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
-  console.log(`🚀 main Server  running on port ${PORT}`);
+  console.log(`🚀 main Server running on port ${PORT}`);
 });
